@@ -14,6 +14,9 @@ const el = {
   report: $("report"),
   subject: $("subject"),
   body: $("body"),
+  bodyHtml: $("bodyHtml"),
+  toolbar: $("toolbar"),
+  htmlToggle: $("htmlToggle"),
   mergeChips: $("mergeChips"),
   loadTemplateBtn: $("loadTemplateBtn"),
   attachments: $("attachments"),
@@ -56,6 +59,8 @@ const state = {
   results: [],
   lastFocused: null,
   sending: false,
+  /** true when the body is showing raw HTML source instead of the WYSIWYG editor. */
+  htmlMode: false,
 };
 
 /* ── helpers ──────────────────────────────────────────────────────────── */
@@ -83,6 +88,142 @@ async function api(path, options = {}) {
 
 const fmtBytes = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
+/* ── body editor (contenteditable, Gmail-friendly) ────────────────────────
+   The body is a rich-text editor so a message pasted from Gmail's Sent folder
+   keeps its formatting. What the recipient receives is exactly this sanitized
+   HTML — the same string feeds the preview iframe and the send payload. */
+
+// Tags a marketing/outreach email legitimately uses. Anything else is unwrapped
+// (its text is kept) so pasted Gmail/Word cruft can't smuggle in scripts or styles.
+const ALLOWED_TAGS = new Set([
+  "A", "ABBR", "B", "BLOCKQUOTE", "BR", "CAPTION", "CENTER", "CODE", "COL", "COLGROUP",
+  "DD", "DIV", "DL", "DT", "EM", "FONT", "H1", "H2", "H3", "H4", "H5", "H6", "HR", "I",
+  "IMG", "LI", "OL", "P", "PRE", "Q", "S", "SMALL", "SPAN", "STRIKE", "STRONG", "SUB",
+  "SUP", "TABLE", "TBODY", "TD", "TFOOT", "TH", "THEAD", "TR", "U", "UL", "WBR",
+]);
+const ALLOWED_ATTR = new Set([
+  "href", "src", "alt", "title", "style", "target", "rel", "width", "height", "align",
+  "dir", "colspan", "rowspan", "valign", "bgcolor", "color", "face", "size", "border",
+  "cellpadding", "cellspacing",
+]);
+const DROP_ENTIRELY = new Set(["SCRIPT", "STYLE", "TITLE", "HEAD", "META", "LINK", "BASE", "IFRAME", "OBJECT", "EMBED", "NOSCRIPT"]);
+
+function sanitizeHtml(html) {
+  const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+
+  // Comments — Gmail and Office paste a lot of them.
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_COMMENT);
+  const comments = [];
+  while (walker.nextNode()) comments.push(walker.currentNode);
+  comments.forEach((c) => c.remove());
+
+  for (const node of doc.body.querySelectorAll("*")) {
+    const tag = node.tagName;
+    if (DROP_ENTIRELY.has(tag)) {
+      node.remove();
+      continue;
+    }
+    if (!ALLOWED_TAGS.has(tag)) {
+      node.replaceWith(...node.childNodes); // unwrap: keep the text, drop the tag
+      continue;
+    }
+    for (const attr of [...node.attributes]) {
+      const name = attr.name.toLowerCase();
+      const val = attr.value;
+      if (name.startsWith("on") || !ALLOWED_ATTR.has(name)) {
+        node.removeAttribute(attr.name);
+        continue;
+      }
+      if (name === "style" && /expression\s*\(|javascript:|(^|;)\s*position\s*:/i.test(val)) {
+        node.removeAttribute(attr.name);
+        continue;
+      }
+      if (name === "href" || name === "src") {
+        const scheme = val.trim().slice(0, 20).toLowerCase().replace(/\s+/g, "");
+        const isDataImage = /^data:image\//i.test(val.trim());
+        if (/^(javascript:|vbscript:)/.test(scheme) || (scheme.startsWith("data:") && !isDataImage)) {
+          node.removeAttribute(attr.name);
+        }
+      }
+    }
+  }
+  return doc.body.innerHTML.trim();
+}
+
+/** The HTML that will actually be sent — always sanitized, whichever mode is active. */
+function getBodyHtml() {
+  return sanitizeHtml(state.htmlMode ? el.bodyHtml.value : el.body.innerHTML);
+}
+
+function setBodyHtml(html) {
+  const clean = sanitizeHtml(html);
+  if (state.htmlMode) el.bodyHtml.value = clean;
+  else el.body.innerHTML = clean;
+  refreshGate();
+}
+
+/** Visible text only — ignores markup — so "empty" survives stray <br>/&nbsp;. */
+function bodyIsEmpty() {
+  return !getBodyHtml().replace(/<br\s*\/?>/gi, "").replace(/&nbsp;/gi, " ").replace(/<[^>]+>/g, "").trim();
+}
+
+function setHtmlMode(on) {
+  if (on === state.htmlMode) return;
+  if (on) el.bodyHtml.value = sanitizeHtml(el.body.innerHTML); // WYSIWYG → source
+  else el.body.innerHTML = sanitizeHtml(el.bodyHtml.value); // source → WYSIWYG
+  state.htmlMode = on;
+  el.body.hidden = on;
+  el.bodyHtml.hidden = !on;
+  el.htmlToggle.classList.toggle("is-active", on);
+  el.toolbar.querySelectorAll(".tb-btn[data-cmd]").forEach((b) => (b.disabled = on));
+  (on ? el.bodyHtml : el.body).focus();
+  refreshGate();
+}
+
+/** Reflect bold/italic/underline state on the toolbar as the caret moves. */
+function syncToolbar() {
+  if (state.htmlMode) return;
+  for (const cmd of ["bold", "italic", "underline"]) {
+    const btn = el.toolbar.querySelector(`.tb-btn[data-cmd="${cmd}"]`);
+    if (!btn) continue;
+    let on = false;
+    try {
+      on = document.queryCommandState(cmd);
+    } catch {
+      on = false;
+    }
+    btn.classList.toggle("is-active", on);
+  }
+}
+
+/** Insert an HTML string at the caret inside a contenteditable host — Range API,
+    not execCommand, so it can't silently no-op and swallow a paste. */
+function insertHtmlAtCaret(host, html) {
+  host.focus();
+  const sel = window.getSelection();
+  let range;
+  if (sel && sel.rangeCount && host.contains(sel.anchorNode)) {
+    range = sel.getRangeAt(0);
+    range.deleteContents();
+  } else {
+    range = document.createRange();
+    range.selectNodeContents(host);
+    range.collapse(false); // caret at the very end
+  }
+  const tpl = document.createElement("template");
+  tpl.innerHTML = html;
+  const frag = tpl.content;
+  const lastNode = frag.lastChild;
+  range.insertNode(frag);
+  if (lastNode && sel) {
+    const after = document.createRange();
+    after.setStartAfter(lastNode);
+    after.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(after);
+  }
+}
+
 function selectedAttachments() {
   return [...el.attachments.querySelectorAll("input[type=checkbox]:checked")].map((c) => c.value);
 }
@@ -90,7 +231,7 @@ function selectedAttachments() {
 function signature() {
   return JSON.stringify({
     subject: el.subject.value,
-    body: el.body.value,
+    body: getBodyHtml(),
     emails: state.recipients.map((r) => r.email),
     attachments: selectedAttachments(),
   });
@@ -165,12 +306,20 @@ function renderMergeChips(fields) {
 }
 
 function insertAtCursor(text) {
-  const target = state.lastFocused === el.subject ? el.subject : el.body;
-  const start = target.selectionStart ?? target.value.length;
-  const end = target.selectionEnd ?? target.value.length;
-  target.value = target.value.slice(0, start) + text + target.value.slice(end);
-  target.focus();
-  target.selectionStart = target.selectionEnd = start + text.length;
+  // Subject or the raw-HTML textarea: plain <input>/<textarea> caret splice.
+  if (state.lastFocused === el.subject || (state.htmlMode && state.lastFocused !== el.subject)) {
+    const t = state.lastFocused === el.subject ? el.subject : el.bodyHtml;
+    const start = t.selectionStart ?? t.value.length;
+    const end = t.selectionEnd ?? t.value.length;
+    t.value = t.value.slice(0, start) + text + t.value.slice(end);
+    t.focus();
+    t.selectionStart = t.selectionEnd = start + text.length;
+    refreshGate();
+    return;
+  }
+
+  // WYSIWYG body: drop the literal {{field}} text in at the caret.
+  insertHtmlAtCaret(el.body, escapeHtml(text));
   refreshGate();
 }
 
@@ -444,7 +593,7 @@ async function runJob({ dryRun, force = false }) {
   const payload = {
     recipients: state.recipients,
     subject: el.subject.value,
-    bodyHtml: el.body.value,
+    bodyHtml: getBodyHtml(),
     attachments: selectedAttachments(),
     throttleMs: Number(el.throttle.value) || 0,
     campaign: el.campaign.value,
@@ -494,7 +643,7 @@ async function onDryRun() {
     method: "POST",
     body: JSON.stringify({
       subject: el.subject.value,
-      bodyHtml: el.body.value,
+      bodyHtml: getBodyHtml(),
       recipients: state.recipients,
       count: Math.min(5, state.recipients.length),
     }),
@@ -567,8 +716,53 @@ el.parseBtn.addEventListener("click", () => parseRecipients().catch(showError));
 
 el.subject.addEventListener("focus", () => (state.lastFocused = el.subject));
 el.body.addEventListener("focus", () => (state.lastFocused = el.body));
+el.bodyHtml.addEventListener("focus", () => (state.lastFocused = el.bodyHtml));
 el.subject.addEventListener("input", refreshGate);
 el.body.addEventListener("input", refreshGate);
+el.bodyHtml.addEventListener("input", refreshGate);
+
+// Toolbar: keep the editor's selection on mousedown, then run the command on click.
+el.toolbar.addEventListener("mousedown", (e) => {
+  if (e.target.closest(".tb-btn")) e.preventDefault();
+});
+el.toolbar.addEventListener("click", (e) => {
+  const btn = e.target.closest(".tb-btn[data-cmd]");
+  if (!btn || btn.disabled) return;
+  const cmd = btn.dataset.cmd;
+  el.body.focus();
+  if (cmd === "createLink") {
+    const url = window.prompt("Link to:", "https://");
+    if (url && url.trim()) document.execCommand("createLink", false, url.trim());
+  } else {
+    document.execCommand(cmd, false, null);
+  }
+  syncToolbar();
+  refreshGate();
+});
+el.htmlToggle.addEventListener("click", () => setHtmlMode(!state.htmlMode));
+
+// Paste from Gmail (or anywhere): keep the HTML formatting, sanitized. If the
+// clipboard has no HTML we build markup from the plain text; if sanitizing leaves
+// nothing usable we bail WITHOUT preventDefault so the native paste still lands —
+// a paste must never be able to empty the body.
+el.body.addEventListener("paste", (e) => {
+  const cd = e.clipboardData;
+  if (!cd) return;
+  const html = cd.getData("text/html");
+  const plain = cd.getData("text/plain");
+  let markup = null;
+  if (html && html.trim()) markup = sanitizeHtml(html);
+  else if (plain) markup = escapeHtml(plain).replace(/\r?\n/g, "<br>");
+  if (!markup) return; // nothing usable — let the browser paste natively
+  e.preventDefault();
+  insertHtmlAtCaret(el.body, markup);
+  refreshGate();
+});
+
+document.addEventListener("selectionchange", () => {
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount && el.body.contains(sel.anchorNode)) syncToolbar();
+});
 
 el.csvInput.addEventListener("change", async () => {
   const file = el.csvInput.files?.[0];
@@ -598,8 +792,8 @@ el.attachInput.addEventListener("change", async () => {
 el.loadTemplateBtn.addEventListener("click", async () => {
   const { html } = await api("/api/template");
   if (!html) return showError(new Error("templates/outreach.html is missing"));
-  if (el.body.value.trim() && !window.confirm("Replace the current body with the starter template?")) return;
-  el.body.value = html;
+  if (!bodyIsEmpty() && !window.confirm("Replace the current body with the starter template?")) return;
+  setBodyHtml(html);
   if (!el.subject.value.trim()) el.subject.value = "Application for {{role}} at {{company}} — Harsh Jha";
   refreshGate();
 });

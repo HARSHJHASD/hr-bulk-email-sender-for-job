@@ -80,10 +80,33 @@
             />
           </label>
 
-          <label class="field">
-            <span class="label">Body <span class="label-note">HTML — the preview on the right is exactly what gets sent</span></span>
-            <textarea id="body" rows="16" spellcheck="false" placeholder="<p>Hi {{name}},</p>"></textarea>
-          </label>
+          <div class="field">
+            <span class="label">Body <span class="label-note">Paste straight from a Gmail sent email — bold, links, spacing &amp; colours are kept</span></span>
+            <div class="editor" id="editor">
+              <div class="toolbar" id="toolbar">
+                <button type="button" class="tb-btn" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+                <button type="button" class="tb-btn" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+                <button type="button" class="tb-btn" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+                <span class="tb-sep"></span>
+                <button type="button" class="tb-btn" data-cmd="insertUnorderedList" title="Bulleted list">&bull; List</button>
+                <button type="button" class="tb-btn" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+                <span class="tb-sep"></span>
+                <button type="button" class="tb-btn" data-cmd="createLink" title="Insert link">Link</button>
+                <button type="button" class="tb-btn" data-cmd="unlink" title="Remove link">Unlink</button>
+                <button type="button" class="tb-btn" data-cmd="removeFormat" title="Clear formatting">Clear</button>
+                <span class="tb-spacer"></span>
+                <button type="button" class="tb-btn tb-toggle" id="htmlToggle" title="Edit the raw HTML source">&lt;/&gt; HTML</button>
+              </div>
+              <div
+                class="editor-body"
+                id="body"
+                contenteditable="true"
+                spellcheck="true"
+                data-placeholder="Write your email here, or paste it straight from a Gmail sent message. Use the chips below to drop in {{name}}, {{company}} and {{role}}."
+              ></div>
+              <textarea class="editor-html" id="bodyHtml" spellcheck="false" hidden></textarea>
+            </div>
+          </div>
 
           <div class="chips" id="mergeChips"></div>
         </section>
