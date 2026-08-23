@@ -1,0 +1,2 @@
+# Do-not-contact list. One email per line. `#` starts a comment.
+# Anyone listed here is skipped even if they appear in your pasted list.

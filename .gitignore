@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Credentials — never commit
+.env
+
+# Runtime data: real HR addresses + send history
+data/*.jsonl
+recipients*.csv
+recipients*.txt
+
+# Uploaded / dropped attachments (keep the folder, not its contents)
+attachments/*
+!attachments/.gitkeep
+
+# Logs / OS cruft
+*.log
+.DS_Store

@@ -1,0 +1,17 @@
+{
+  "name": "hr-mail-blaster",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Local dashboard for sending personalized HR outreach email over SMTP",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "dev": "node --env-file-if-exists=.env --watch server.js",
+    "test": "node --test test/unit.test.js test/integration.test.js"
+  },
+  "dependencies": {
+    "express": "^4.22.2",
+    "multer": "^2.2.0",
+    "nodemailer": "^9.0.5"
+  }
+}

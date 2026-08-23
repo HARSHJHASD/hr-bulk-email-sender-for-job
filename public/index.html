@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HR Mail Blaster</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <h1>HR Mail Blaster</h1>
+      </div>
+      <div class="status" id="status">
+        <span class="pill pill--muted" id="statusPill">checking…</span>
+        <span class="status-meta" id="statusMeta"></span>
+      </div>
+    </header>
+
+    <div class="banner banner--warn" id="setupBanner" hidden>
+      <strong>SMTP not configured.</strong>
+      <span id="setupBannerText"></span>
+      Dry runs work now; real sends unlock once <code>mailer/.env</code> is filled in. See
+      <code>mailer/README.md</code>.
+    </div>
+
+    <main class="layout">
+      <!-- ── Compose ─────────────────────────────────────────────────── -->
+      <div class="column">
+        <section class="panel">
+          <div class="panel-head">
+            <h2><span class="step">1</span> Recipients</h2>
+            <div class="head-actions">
+              <label class="btn btn--ghost btn--sm">
+                Upload CSV
+                <input type="file" id="csvInput" accept=".csv,.txt" hidden />
+              </label>
+              <button class="btn btn--ghost btn--sm" id="parseBtn">Re-check</button>
+            </div>
+          </div>
+
+          <label class="field">
+            <span class="label">Campaign name</span>
+            <input type="text" id="campaign" placeholder="e.g. sde-outreach-aug" />
+            <span class="hint">
+              Used by the duplicate guard: the same address is never mailed twice within one campaign.
+            </span>
+          </label>
+
+          <label class="field">
+            <span class="label">
+              Paste your list — <code>email, name, company, role</code>
+            </span>
+            <textarea
+              id="recipients"
+              rows="9"
+              spellcheck="false"
+              placeholder="priya@acme.com, Priya Sharma, Acme Corp, SDE-1&#10;hr@globex.com, , Globex, Frontend Engineer&#10;Rahul Verma &lt;rahul@initech.com&gt;&#10;&#10;A header row (Email,Name,Company,Role) is detected automatically.&#10;Name / company / role are optional."
+            ></textarea>
+          </label>
+
+          <div class="report" id="report"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2><span class="step">2</span> Message</h2>
+            <div class="head-actions">
+              <button class="btn btn--ghost btn--sm" id="loadTemplateBtn">Load starter template</button>
+            </div>
+          </div>
+
+          <label class="field">
+            <span class="label">Subject</span>
+            <input
+              type="text"
+              id="subject"
+              placeholder="Application for {{role}} at {{company}} — Harsh Jha"
+            />
+          </label>
+
+          <label class="field">
+            <span class="label">Body <span class="label-note">HTML — the preview on the right is exactly what gets sent</span></span>
+            <textarea id="body" rows="16" spellcheck="false" placeholder="<p>Hi {{name}},</p>"></textarea>
+          </label>
+
+          <div class="chips" id="mergeChips"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2><span class="step">3</span> Attachment</h2>
+            <div class="head-actions">
+              <label class="btn btn--ghost btn--sm">
+                Upload file
+                <input type="file" id="attachInput" multiple hidden />
+              </label>
+            </div>
+          </div>
+          <div class="attachments" id="attachments"></div>
+        </section>
+      </div>
+
+      <!-- ── Preview + send ──────────────────────────────────────────── -->
+      <div class="column column--sticky">
+        <section class="panel">
+          <div class="panel-head">
+            <h2><span class="step">4</span> Review &amp; send</h2>
+          </div>
+
+          <div class="controls">
+            <label class="field field--inline">
+              <span class="label">Delay between sends</span>
+              <div class="throttle">
+                <input type="number" id="throttle" min="0" step="500" />
+                <span class="unit">ms</span>
+              </div>
+            </label>
+          </div>
+
+          <div class="actions">
+            <button class="btn btn--secondary" id="dryRunBtn">Dry run preview</button>
+            <button class="btn btn--primary" id="sendBtn" disabled>Send</button>
+          </div>
+          <p class="gate" id="gate">Run a dry run first — the send button unlocks after you've seen the preview.</p>
+        </section>
+
+        <section class="panel" id="previewPanel" hidden>
+          <div class="panel-head">
+            <h2>Preview</h2>
+            <div class="head-actions">
+              <button class="btn btn--ghost btn--sm" id="prevRecipient">‹</button>
+              <span class="counter" id="previewCounter"></span>
+              <button class="btn btn--ghost btn--sm" id="nextRecipient">›</button>
+            </div>
+          </div>
+          <div class="preview-meta">
+            <div><span class="k">To</span><span class="v" id="previewTo"></span></div>
+            <div><span class="k">Subject</span><span class="v" id="previewSubject"></span></div>
+            <div><span class="k">Attached</span><span class="v" id="previewAttach"></span></div>
+          </div>
+          <iframe class="preview-frame" id="previewFrame" sandbox title="Email preview"></iframe>
+          <details class="plaintext">
+            <summary>Plain-text version (sent alongside for deliverability)</summary>
+            <pre id="previewText"></pre>
+          </details>
+        </section>
+
+        <section class="panel" id="logPanel" hidden>
+          <div class="panel-head">
+            <h2>Send log</h2>
+            <div class="head-actions">
+              <button class="btn btn--danger btn--sm" id="abortBtn" hidden>Abort</button>
+              <button class="btn btn--ghost btn--sm" id="failedCsvBtn" hidden>Download failures</button>
+            </div>
+          </div>
+          <div class="progress"><div class="progress-bar" id="progressBar"></div></div>
+          <div class="tally" id="tally"></div>
+          <div class="log" id="log"></div>
+        </section>
+      </div>
+    </main>
+
+    <!-- ── Confirm modal ─────────────────────────────────────────────── -->
+    <div class="overlay" id="overlay" hidden>
+      <div class="modal">
+        <h3 id="modalTitle">Send for real?</h3>
+        <div class="modal-body" id="modalBody"></div>
+        <div class="modal-actions">
+          <button class="btn btn--ghost" id="modalCancel">Cancel</button>
+          <button class="btn btn--primary" id="modalConfirm">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
