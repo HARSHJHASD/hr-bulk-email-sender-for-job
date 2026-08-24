@@ -26,7 +26,7 @@ export const config = {
   },
   fromName: process.env.FROM_NAME || "",
   replyTo: process.env.REPLY_TO || process.env.SMTP_USER || "",
-  throttleMs: num(process.env.THROTTLE_MS, 5000),
+  throttleMs: num(process.env.THROTTLE_MS, 2000),
   dailyCap: num(process.env.DAILY_CAP, 500),
   port: num(process.env.PORT, 8787),
 };
