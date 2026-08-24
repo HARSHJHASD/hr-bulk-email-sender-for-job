@@ -153,6 +153,7 @@ test("end-to-end: dashboard API sends real SMTP mail with an attachment", async 
     assert.equal(smtp.messages.length, 0, "dry run must not touch SMTP");
     const ledger = path.join(dataDir, "sent-log.jsonl");
     assert.equal(fs.existsSync(ledger), false, "dry run must not write the ledger");
+    assert.equal(fs.existsSync(path.join(dataDir, "campaigns")), false, "dry run must not write an archive");
   });
 
   await t.test("real send delivers one message per recipient, with the attachment", async () => {
@@ -203,6 +204,34 @@ test("end-to-end: dashboard API sends real SMTP mail with an attachment", async 
     const parsed = await (await post("/api/recipients/parse", { text: listText, campaign: "aug" })).json();
     assert.equal(parsed.report.alreadySent.length, 2, "the two successes are now skipped");
     assert.equal(parsed.recipients.length, 1, "the failure remains available to retry");
+  });
+
+  await t.test("archives the run: subject, body, attachment and recipient list on disk", async () => {
+    const campaignsDir = path.join(dataDir, "campaigns");
+    const runs = fs.readdirSync(campaignsDir);
+    const dir = runs
+      .map((name) => path.join(campaignsDir, name))
+      .find((full) => JSON.parse(fs.readFileSync(path.join(full, "manifest.json"), "utf8")).campaign === "aug");
+    assert.ok(dir, "an archive folder exists for campaign 'aug'");
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
+    assert.equal(manifest.subject, message.subject);
+    assert.deepEqual(
+      manifest.attachments.map((a) => a.name),
+      ["resume.pdf"]
+    );
+    assert.equal(manifest.counts.total, 3);
+    assert.equal(manifest.counts.sent, 2);
+    assert.equal(manifest.counts.failed, 1);
+
+    const bodyHtml = fs.readFileSync(path.join(dir, "body.html"), "utf8");
+    assert.match(bodyHtml, /Re the \{\{role\}\} role/, "the raw composed body is archived");
+    assert.ok(fs.existsSync(path.join(dir, "body.txt")), "plain-text body written");
+
+    const csv = fs.readFileSync(path.join(dir, "recipients.csv"), "utf8");
+    assert.match(csv, /priya@acme\.com/, "recipient email listed in the CSV");
+    const priyaRow = csv.split("\n").find((line) => line.includes("priya@acme.com"));
+    assert.match(priyaRow, /sent/, "Priya's row records a 'sent' status");
   });
 
   await t.test("a real send is refused while SMTP details are missing from the payload", async () => {

@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { renderMessage } from "./template.js";
 import { sendOne, resolveAttachments, closeTransport } from "./mailer.js";
 import { appendLedger } from "./ledger.js";
+import { writeRunArchive } from "./archive.js";
 
 const jobs = new Map();
 
@@ -64,8 +65,10 @@ export function createJob({
       return;
     }
 
+    const startedAt = new Date().toISOString();
     emit("start", { total: job.total, dryRun, throttleMs, campaign, attachments });
 
+    const outcomeByIndex = new Map();
     for (let i = 0; i < recipients.length; i += 1) {
       if (job.aborting) {
         job.skipped = recipients.length - i;
@@ -121,6 +124,7 @@ export function createJob({
         timestamp: new Date().toISOString(),
       };
       appendLedger(entry);
+      outcomeByIndex.set(i, { status, messageId, error: entry.error });
 
       if (lastError) job.failed += 1;
       else job.sent += 1;
@@ -131,7 +135,23 @@ export function createJob({
       if (!isLast && !job.aborting && throttleMs > 0) await sleep(jitter(throttleMs));
     }
 
-    if (!dryRun) closeTransport();
+    if (!dryRun) {
+      closeTransport();
+      writeRunArchive({
+        jobId: id,
+        campaign,
+        subject,
+        bodyHtml,
+        attachments,
+        recipients,
+        outcomeByIndex,
+        throttleMs,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        counts: { total: job.total, sent: job.sent, failed: job.failed, skipped: job.skipped },
+        aborted: job.aborting,
+      });
+    }
     job.state = job.aborting ? "aborted" : "done";
     emit("done", {
       sent: job.sent,

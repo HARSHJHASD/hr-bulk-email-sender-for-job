@@ -10,6 +10,8 @@ export const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR
 export const TEMPLATES_DIR = path.join(ROOT, "templates");
 export const LEDGER_FILE = path.join(DATA_DIR, "sent-log.jsonl");
 export const SUPPRESSION_FILE = path.join(DATA_DIR, "suppression.txt");
+// One folder per real send: subject + body + attachment names + recipient list.
+export const CAMPAIGNS_DIR = path.join(DATA_DIR, "campaigns");
 
 const num = (value, fallback) => {
   const parsed = Number.parseInt(value ?? "", 10);

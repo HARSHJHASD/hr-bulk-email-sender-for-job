@@ -12,6 +12,7 @@ fs.writeFileSync(path.join(tmp, "suppression.txt"), "blocked@nope.com\n# a comme
 const { parseRecipients } = await import("../src/recipients.js");
 const { render, htmlToText, renderMessage } = await import("../src/template.js");
 const { appendLedger } = await import("../src/ledger.js");
+const { slugify, stamp } = await import("../src/archive.js");
 
 test("parses positional rows: email, name, company, role", () => {
   const { recipients } = parseRecipients("priya@acme.com, Priya Sharma, Acme Corp, SDE-1");
@@ -116,6 +117,17 @@ test("renderMessage produces subject, html and text together", () => {
   assert.equal(msg.subject, "Application for SDE-1 at Acme");
   assert.equal(msg.html, "<p>Hi Priya,</p>");
   assert.equal(msg.text, "Hi Priya,");
+});
+
+test("archive slugify cleans a campaign name and defaults when blank", () => {
+  assert.equal(slugify("SDE Outreach, Aug 2026!"), "sde-outreach-aug-2026");
+  assert.equal(slugify(""), "no-campaign");
+  assert.equal(slugify("   "), "no-campaign");
+});
+
+test("archive stamp is a filename-safe timestamp with no colons", () => {
+  assert.equal(stamp("2026-08-24T14:30:05.123Z"), "2026-08-24_14-30-05");
+  assert.doesNotMatch(stamp(new Date().toISOString()), /:/);
 });
 
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));

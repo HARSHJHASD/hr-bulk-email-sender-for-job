@@ -9,6 +9,9 @@ data/*.jsonl
 recipients*.csv
 recipients*.txt
 
+# Campaign archives: subject/body + real HR addresses
+data/campaigns/
+
 # Uploaded / dropped attachments (keep the folder, not its contents)
 attachments/*
 !attachments/.gitkeep
